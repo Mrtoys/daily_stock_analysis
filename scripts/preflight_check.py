@@ -161,10 +161,24 @@ def check_env(config: Any) -> List[Check]:
         name, value = _first_env(names)
         if name:
             available_llm.append(f"{label}({name})")
+    # Anspire 的 Key 可同时充当搜索源和 OpenAI 兼容大模型通道
+    # （ANSPIRE_LLM_ENABLED 默认 true），因此只配它时也应判为 LLM 可用。
+    if not available_llm:
+        anspire_env, anspire_key = _first_env(("ANSPIRE_API_KEYS",))
+        anspire_enabled = (os.getenv("ANSPIRE_LLM_ENABLED") or "true").strip().lower()
+        if anspire_env and anspire_enabled not in ("false", "0", "no", "off"):
+            available_llm.append(f"Anspire 共用({anspire_env} {_mask(anspire_key)})")
     if available_llm:
         results.append(Check("LLM Key", OK, " / ".join(available_llm)))
     else:
-        results.append(Check("LLM Key", FAIL, "未配置任何 LLM Key，分析无法生成结论", critical=False))
+        results.append(
+            Check(
+                "LLM Key",
+                FAIL,
+                "未配置任何 LLM Key，分析无法生成结论；可配 DEEPSEEK_API_KEY / GEMINI_API_KEY / AIHUBMIX_KEY / MODELFLARE_KEY，或直接配 ANSPIRE_API_KEYS",
+                critical=False,
+            )
+        )
 
     # 搜索源
     available_search = []
