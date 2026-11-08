@@ -145,7 +145,15 @@ def check_env(config: Any) -> List[Check]:
         missing = [n for n, v in (("FEISHU_APP_ID", app_id), ("FEISHU_APP_SECRET", app_secret), ("FEISHU_CHAT_ID", chat_id)) if not v]
         results.append(Check("飞书配置", FAIL, f"应用机器人参数不全，缺 {', '.join(missing)}", critical=True))
     else:
-        results.append(Check("飞书配置", FAIL, "未配置 FEISHU_WEBHOOK_URL，也未配置应用机器人三件套", critical=True))
+        results.append(
+            Check(
+                "飞书配置",
+                FAIL,
+                "读取不到 FEISHU_WEBHOOK_URL：请到 Settings → Secrets and variables → Actions，"
+                "在 Secrets（或 Variables）标签下新增该名称，注意必须点进本仓库 Mrtoys/daily_stock_analysis 的 Settings",
+                critical=True,
+            )
+        )
 
     # LLM
     available_llm = []
@@ -417,14 +425,17 @@ def check_feishu(config: Any, region: str, stock_list: str) -> List[Check]:
 
     if ok:
         return [Check("飞书推送", OK, "已发送测试卡片，请到群里确认", critical=True)]
-    return [
-        Check(
-            "飞书推送",
-            FAIL,
-            "发送失败。常见原因：Webhook 地址错误 / 签名或关键词校验未过（code=19021、19024）",
-            critical=True,
-        )
-    ]
+
+    # 失败时给一条能直接动手的线索，而不是只有"发送失败"
+    hints = []
+    if not (os.getenv("FEISHU_WEBHOOK_SECRET") or "").strip():
+        hints.append("未配置 FEISHU_WEBHOOK_SECRET（机器人若启用签名校验会返回 code=19021）")
+    if not (os.getenv("FEISHU_WEBHOOK_KEYWORD") or "").strip():
+        hints.append("若启用的是关键词校验则需配 FEISHU_WEBHOOK_KEYWORD")
+    detail = "发送失败，飞书未受理"
+    if hints:
+        detail += "：" + "；".join(hints)
+    return [Check("飞书推送", FAIL, detail, critical=True)]
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +453,27 @@ def _display_width(text: str) -> int:
 
 def _pad(text: str, width: int) -> str:
     return text + " " * max(0, width - _display_width(text))
+
+
+def emit_annotations(results: Sequence[Check]) -> None:
+    """把失败项推到 GitHub Actions 的注解区（Annotations）。
+
+    默认只返回 exit code 1 的话，界面上只能看到「Process completed with
+    exit code 1」，看不到到底哪一项没过。这里用 ``::error`` / ``::warning``
+    工作流命令把每一条失败项变成一条独立注解，一眼就能定位。
+
+    GitHub 每个 step 最多展示 10 条 error 注解，所以各截断到 8 条。
+    """
+    if os.getenv("GITHUB_ACTIONS") != "true":
+        return
+
+    errors = [item for item in results if item.status == FAIL and item.critical]
+    warnings = [item for item in results if item.status in (FAIL, WARN) and not item.critical]
+
+    for item in errors[:8]:
+        print(f"::error title=自检失败·{item.name}::{item.detail}", flush=True)
+    for item in warnings[:8]:
+        print(f"::warning title=自检提醒·{item.name}::{item.detail}", flush=True)
 
 
 def render(results: Sequence[Check]) -> None:
@@ -527,6 +559,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.json:
         print(json.dumps([item.to_dict() for item in results], ensure_ascii=False, indent=2))
     else:
+        # 先把失败项推到注解区，再打表格（注解不依赖日志滚动位置）
+        emit_annotations(results)
         render(results)
 
     critical_fail = [item for item in results if item.critical and item.status == FAIL]
