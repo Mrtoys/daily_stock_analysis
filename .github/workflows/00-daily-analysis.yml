@@ -5,7 +5,7 @@ on:
   # 如需改时间，务必同步修改下方 step 中判断 github.event.schedule 的字符串。
   schedule:
     - cron: '30 23 * * 1-5'    # UTC 23:30 = 北京时间次日 07:30（周二~周六）→ 美股复盘 + 新闻早报
-    - cron: '30 13 * * 1-5'    # UTC 13:30 = 北京时间 21:30（周一~周五）→ 美股个股盘前分析
+    - cron: '30 12 * * 1-5'    # UTC 12:30 = 北京时间 20:30（周一~周五）→ 美股个股盘前分析
 
   # 手动触发
   workflow_dispatch:
@@ -503,7 +503,7 @@ jobs:
                 MODE="market-only"
                 RUN_NEWS="true"
                 ;;
-              "30 13 * * 1-5")
+              "30 12 * * 1-5")
                 MODE="stocks-only"
                 ;;
               *)
