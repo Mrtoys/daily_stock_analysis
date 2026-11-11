@@ -2,13 +2,13 @@
 # -*- coding: utf-8 -*-
 """
 ===================================
-美股时事新闻早报 → 飞书推送
+美股时事新闻 → 飞书推送
 ===================================
 
 职责：
 1. 复用项目已配置的搜索源（Anspire / SerpAPI / Tavily / Bocha / Brave / MiniMax / SearXNG）
    抓取隔夜美股与宏观相关的新闻素材
-2. 复用项目已配置的 LLM 把素材归纳成条理清晰的「美股时事新闻早报」
+2. 复用项目已配置的 LLM 把素材归纳成条理清晰的「美股时事新闻」
 3. 复用 FeishuSender 推送到飞书（Webhook 或应用机器人）
 
 与 `python main.py --market-review` 的区别：
@@ -21,12 +21,12 @@
     python scripts/us_news_digest.py --dry-run       # 只打印并落盘，不推送
     python scripts/us_news_digest.py --no-llm        # 跳过 LLM，直接整理成新闻清单
     python scripts/us_news_digest.py --limit 8       # 控制要闻条数上限
-    python scripts/us_news_digest.py --save          # 额外把早报写入 reports/
+    python scripts/us_news_digest.py --save          # 额外把新闻稿写入 reports/
 
 环境变量（可选）：
     US_NEWS_QUERIES   自定义搜索主题，多个用英文逗号分隔；留空使用内置美股主题
     US_NEWS_LIMIT     要闻条数上限，默认 7
-    US_NEWS_CARD_TITLE 飞书卡片标题，默认「美股时事新闻早报」
+    US_NEWS_CARD_TITLE 飞书卡片标题，默认「美股时事新闻」
 
 退出码：
     0 成功
@@ -86,13 +86,13 @@ def _setup_logging(debug: bool = False) -> None:
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="美股时事新闻早报生成与飞书推送",
+        description="美股时事新闻生成与飞书推送",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--dry-run", action="store_true", help="只生成并打印早报，不推送")
+    parser.add_argument("--dry-run", action="store_true", help="只生成并打印新闻稿，不推送")
     parser.add_argument("--no-llm", action="store_true", help="跳过 LLM 归纳，直接整理新闻清单")
-    parser.add_argument("--save", action="store_true", help="把早报写入 reports/ 目录")
+    parser.add_argument("--save", action="store_true", help="把新闻稿写入 reports/ 目录")
     parser.add_argument("--limit", type=int, default=None, help="要闻条数上限（默认取 US_NEWS_LIMIT 或 7）")
     parser.add_argument("--max-material", type=int, default=40, help="送入 LLM 的新闻素材条数上限（默认 40）")
     parser.add_argument("--debug", action="store_true", help="输出调试日志")
@@ -236,7 +236,7 @@ def build_prompt(material: str, report_date: str, limit: int, language: str = "z
     if language == "en":
         return (
             f"You are a US market news editor. Below is raw news material collected on {report_date} "
-            "morning Beijing time. Build a concise 'US Market Overnight Brief'.\n\n"
+            "(Beijing time). Build a concise 'US Market News Brief'.\n\n"
             "Rules:\n"
             "1. Start with one sentence (<=40 words) capturing the core tension of the session.\n"
             f"2. Then output 5-{limit} headlines ordered by importance. Format each as:\n"
@@ -251,8 +251,8 @@ def build_prompt(material: str, report_date: str, limit: int, language: str = "z
         )
 
     return (
-        f"你是美股市场新闻编辑。下面是 {report_date} 早上抓取的原始新闻素材，可能包含噪音。\n"
-        "请产出「美股时事新闻早报」，读者是关注美股的中国投资者。\n\n"
+        f"你是美股市场新闻编辑。下面是 {report_date} 抓取的原始新闻素材，可能包含噪音。\n"
+        "请产出「美股时事新闻」，读者是关注美股的中国投资者。\n\n"
         "要求：\n"
         "1. 先用一句话（不超过 60 字）概括隔夜美股与宏观的核心矛盾。\n"
         f"2. 再输出 5-{limit} 条要闻，按重要性排序。每条格式严格如下：\n"
@@ -283,7 +283,7 @@ def summarize_with_llm(config: Any, prompt: str) -> Optional[str]:
 
 
 def build_header(report_date: str) -> str:
-    return f"# 📰 美股时事新闻早报\n\n**{report_date}**  ·  北京时间"
+    return f"# 📰 美股时事新闻\n\n**{report_date}**  ·  北京时间"
 
 
 def render_fallback(items: Sequence[Dict[str, Any]], limit: int) -> str:
@@ -327,10 +327,10 @@ def save_report(content: str, report_date: str) -> Optional[Path]:
         stamp = report_date.replace("-", "").replace(" ", "_").replace(":", "")
         path = reports_dir / f"us_news_{stamp}.md"
         path.write_text(content, encoding="utf-8")
-        logger.info("早报已保存: %s", path)
+        logger.info("新闻稿已保存: %s", path)
         return path
     except OSError as exc:
-        logger.warning("早报落盘失败: %s", exc)
+        logger.warning("新闻稿落盘失败: %s", exc)
         return None
 
 
@@ -362,7 +362,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     now = datetime.now(REPORT_TZ)
     report_date = now.strftime("%Y-%m-%d")
     limit = args.limit if args.limit and args.limit > 0 else int(os.getenv("US_NEWS_LIMIT", "7") or 7)
-    card_title = (os.getenv("US_NEWS_CARD_TITLE") or "美股时事新闻早报").strip()
+    card_title = (os.getenv("US_NEWS_CARD_TITLE") or "美股时事新闻").strip()
 
     config = get_config()
     topics = load_topics()
