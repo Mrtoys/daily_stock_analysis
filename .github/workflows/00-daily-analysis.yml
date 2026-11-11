@@ -1,11 +1,11 @@
 name: 每日股票分析
 
 on:
-  # 定时触发（UTC）。本项目按美股作息配置，两条 cron 分别对应早报与晚报。
+  # 定时触发（UTC）。本项目按美股 + A 股作息配置，两条 cron 分别对应新闻与个股分析。
   # 如需改时间，务必同步修改下方 step 中判断 github.event.schedule 的字符串。
   schedule:
-    - cron: '30 23 * * 1-5'    # UTC 23:30 = 北京时间次日 07:30（周二~周六）→ 美股复盘 + 新闻早报
-    - cron: '30 12 * * 1-5'    # UTC 12:30 = 北京时间 20:30（周一~周五）→ 美股个股盘前分析
+    - cron: '0 11 * * 2-6'    # UTC 11:00 = 北京时间 19:00（周二~周六）→ 仅美股时事新闻
+    - cron: '0 12 * * 1-5'    # UTC 12:00 = 北京时间 20:00（周一~周五）→ 美股 + A股 个股分析
 
   # 手动触发
   workflow_dispatch:
@@ -18,7 +18,8 @@ on:
         options:
           - full          # 完整分析（股票+大盘）
           - market-only   # 仅大盘复盘
-          - stocks-only   # 仅股票分析
+          - stocks-only   # 仅股票分析（美股 + A股）
+          - news-only     # 仅新闻推送（不跑个股/大盘分析）
           - preflight     # 仅配置自检（验证飞书/数据/LLM/搜索，不跑分析，约 30 秒）
       force_run:
         description: '强制运行（跳过交易日检查）'
@@ -26,12 +27,12 @@ on:
         default: false
         type: boolean
       with_news:
-        description: '同时推送美股新闻早报'
+        description: '同时推送美股时事新闻'
         required: false
         default: false
         type: boolean
 
-# 并发控制：同一时段只运行一个分析任务（早报与晚报互不阻塞）
+# 并发控制：同一时段只运行一个分析任务（新闻与个股互不阻塞）
 concurrency:
   group: stock-analysis-${{ github.event.schedule || 'manual' }}
   cancel-in-progress: false
@@ -451,12 +452,12 @@ jobs:
           TRADING_DAY_CHECK_ENABLED: ${{ vars.TRADING_DAY_CHECK_ENABLED || secrets.TRADING_DAY_CHECK_ENABLED || 'true' }}
           
           # ==========================================
-          # 美股新闻早报（scripts/us_news_digest.py）
+          # 美股时事新闻（scripts/us_news_digest.py）
           # ==========================================
           # 要闻条数上限
           US_NEWS_LIMIT: ${{ vars.US_NEWS_LIMIT || '7' }}
           # 飞书卡片标题
-          US_NEWS_CARD_TITLE: ${{ vars.US_NEWS_CARD_TITLE || '美股时事新闻早报' }}
+          US_NEWS_CARD_TITLE: ${{ vars.US_NEWS_CARD_TITLE || '美股时事晚报' }}
           # 自定义搜索主题，多个用英文逗号分隔；留空使用内置的美股主题
           US_NEWS_QUERIES: ${{ vars.US_NEWS_QUERIES || '' }}
           
@@ -480,7 +481,7 @@ jobs:
           if [ -n "${STOCK_LIST_CONFIG:-}" ]; then
             export STOCK_LIST="$STOCK_LIST_CONFIG"
           elif [ -z "${STOCK_LIST:-}" ]; then
-            export STOCK_LIST="QQQ,SPX,AAPL,NVDA,MSFT,TSLA,GOOGL,AMZN,META,SOXL,BABA,PDD,MU,INTC,CRCL"
+            export STOCK_LIST="QQQ,SPX,AAPL,NVDA,MSFT,TSLA,GOOGL,AMZN,META,SOXL,BABA,PDD,MU,INTC,CRCL,510500"
           fi
 
           # 处理 LITELLM YAML 配置文件
@@ -494,16 +495,16 @@ jobs:
           fi
 
           # 判断运行模式
-          # 定时触发：两条 cron 分别对应早报与晚报（cron 字符串必须与 on.schedule 完全一致）
+          # 定时触发：两条 cron 分别对应新闻与个股分析（cron 字符串必须与 on.schedule 完全一致）
           MODE="${{ github.event.inputs.mode || '' }}"
           RUN_NEWS="false"
           if [ -z "$MODE" ]; then
             case "${{ github.event.schedule }}" in
-              "30 23 * * 1-5")
-                MODE="market-only"
+              "0 11 * * 2-6")
+                MODE="news-only"
                 RUN_NEWS="true"
                 ;;
-              "30 12 * * 1-5")
+              "0 12 * * 1-5")
                 MODE="stocks-only"
                 ;;
               *)
@@ -516,14 +517,14 @@ jobs:
           fi
           
           echo "=========================================="
-          echo "🚀 美股每日分析系统"
+          echo "🚀 股票每日分析系统（美股 + A股）"
           echo "=========================================="
           echo "⏰ 时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
           echo "🎯 运行模式: $MODE"
           echo "📊 自选股: $STOCK_LIST"
           echo "📝 报告类型: $REPORT_TYPE"
-          echo "📰 新闻早报: $RUN_NEWS"
-          echo "🌍 大盘区域: $MARKET_REVIEW_REGION"
+          echo "📰 新闻推送: $RUN_NEWS"
+          echo "🌍 大盘复盘: 已停用（只跑个股 + 新闻）"
           echo ""
           echo "=========================================="
           echo "📋 配置检查"
@@ -612,33 +613,38 @@ jobs:
             exit $PREFLIGHT_EXIT
           fi
 
-          # 执行分析（失败也要继续跑新闻早报，因此临时关闭 set -e）
+          # 执行分析（失败也要继续跑新闻，因此临时关闭 set -e）
           set +e
-          if [ "$MODE" = "market-only" ]; then
+          ANALYSIS_EXIT=0
+          if [ "$MODE" = "news-only" ]; then
+            echo "⏭️  仅新闻模式：跳过个股/大盘分析"
+          elif [ "$MODE" = "market-only" ]; then
             python main.py --market-review $FORCE_RUN_ARG
+            ANALYSIS_EXIT=$?
           elif [ "$MODE" = "stocks-only" ]; then
             python main.py --no-market-review $FORCE_RUN_ARG
+            ANALYSIS_EXIT=$?
           else
             python main.py $FORCE_RUN_ARG
+            ANALYSIS_EXIT=$?
           fi
-          ANALYSIS_EXIT=$?
           set -e
           if [ "$ANALYSIS_EXIT" -ne 0 ]; then
             echo "::warning::主分析流程退出码 $ANALYSIS_EXIT"
           fi
 
-          # 美股新闻早报（仅在早报时段运行）
+          # 美股时事新闻（新闻模式或手动勾选 with_news 时运行）
           if [ "$RUN_NEWS" = "true" ]; then
             echo ""
             echo "=========================================="
-            echo "📰 生成美股新闻早报"
+            echo "📰 生成美股时事新闻"
             echo "=========================================="
             set +e
             python scripts/us_news_digest.py
             NEWS_EXIT=$?
             set -e
             if [ "$NEWS_EXIT" -ne 0 ]; then
-              echo "::warning::新闻早报退出码 $NEWS_EXIT（不影响主分析结果）"
+              echo "::warning::新闻推送退出码 $NEWS_EXIT（不影响主分析结果）"
             fi
           fi
 
