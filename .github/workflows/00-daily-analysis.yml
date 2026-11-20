@@ -4,8 +4,8 @@ on:
   # 定时触发（UTC）。本项目按美股 + A 股作息配置，两条 cron 分别对应新闻与个股分析。
   # 如需改时间，务必同步修改下方 step 中判断 github.event.schedule 的字符串。
   schedule:
-    - cron: '0 11 * * 2-6'    # UTC 11:00 = 北京时间 19:00（周二~周六）→ 仅美股时事新闻
-    - cron: '0 12 * * 1-5'    # UTC 12:00 = 北京时间 20:00（周一~周五）→ 美股 + A股 个股分析
+    - cron: '0 02 * * 2-6'    # UTC 02:00 = 北京时间 10:00（周二~周六）→ 仅美股时事新闻
+    - cron: '0 03 * * 1-5'    # UTC 03:00 = 北京时间 11:00（周一~周五）→ 美股 + A股 个股分析
 
   # 手动触发
   workflow_dispatch:
@@ -500,11 +500,11 @@ jobs:
           RUN_NEWS="false"
           if [ -z "$MODE" ]; then
             case "${{ github.event.schedule }}" in
-              "0 11 * * 2-6")
+              "0 02 * * 2-6")
                 MODE="news-only"
                 RUN_NEWS="true"
                 ;;
-              "0 12 * * 1-5")
+              "0 03 * * 1-5")
                 MODE="stocks-only"
                 ;;
               *)
